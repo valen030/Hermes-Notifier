@@ -144,7 +144,7 @@ def activate_hermes_dependencies() -> None:
 def prepare_runtime(configuration: Configuration) -> Path:
     from dotenv import set_key
     from hermes_cli.profiles import get_profile_dir
-    import yaml
+    import hermes_yaml as yaml
 
     home = get_profile_dir("default")
     os.environ["HERMES_HOME"] = str(home)
