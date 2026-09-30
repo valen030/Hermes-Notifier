@@ -5,14 +5,17 @@ Generic bill, loan and birthday reminders using Hermes-native cron and Telegram.
 
 The base image is `docker.io/nousresearch/hermes-agent:main`. Its normal
 entrypoint, bootstrap and user handling are inherited, not overridden.
-The container command uses the installed Hermes Python environment to validate
+The container command activates the dependency directory and `.pth` hooks from
+the image's `/opt/hermes/manifest.json`, matching Hermes's generated launchers.
+It uses the installed Hermes Python environment to validate
 configuration, reconcile native jobs, and run the native dashboard alongside
 `cron.scheduler_provider.InProcessCronScheduler.start`. This is Hermes's built-in
 continuous ticker, not APScheduler, a polling implementation or repeated CLI ticks.
 
 Hermes Gateway is not launched. Automatic profile-Gateway boot reconciliation is
 disabled in the image so retained Gateway state cannot start it on redeployment.
-The image's separate supervised dashboard is disabled to avoid duplicate servers;
+The image's separate dashboard autostart entry is removed from the s6 user bundle,
+even if Render supplies `HERMES_DASHBOARD=1`, to avoid duplicate servers;
 the launcher runs the native dashboard directly, including on platforms where the
 upstream entrypoint cannot use s6 because it is not PID 1. Dashboard exit stops
 the ticker; unexpected ticker exit terminates the service.
@@ -48,6 +51,7 @@ docker build --pull -t hermes-notifier .
 The build does not import or initialize Hermes before the image's runtime
 bootstrap. Native APIs are loaded at startup; failures produce a redacted
 traceback and stop the service, without falling back to another scheduler.
+No separate dashboard should start on port 9119 after a notifier startup failure.
 A successful build does not validate Render's runtime ENV values or prove a
 successful Render launch.
 

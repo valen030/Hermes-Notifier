@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 import re
 import signal
+import site
 import threading
 import traceback
 from dataclasses import dataclass, field
@@ -127,6 +129,18 @@ def install_log_redaction(secrets: tuple[str, ...]) -> None:
     logging.setLogRecordFactory(record_factory)
 
 
+def activate_hermes_dependencies() -> None:
+    root = Path(os.environ.get("HERMES_INSTALL_ROOT", "/opt/hermes"))
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    dependency_directory = manifest["runtime"]["sitePackages"]
+    if not isinstance(dependency_directory, str) or not dependency_directory:
+        raise ConfigurationError("Hermes manifest has no dependency directory")
+    dependency_path = root / dependency_directory
+    if not dependency_path.is_dir():
+        raise ConfigurationError("Hermes manifest dependency directory does not exist")
+    site.addsitedir(str(dependency_path))
+
+
 def prepare_runtime(configuration: Configuration) -> Path:
     from dotenv import set_key
     from hermes_cli.profiles import get_profile_dir
@@ -232,6 +246,7 @@ def main() -> int:
     try:
         configuration = load_configuration()
         notifications = load_notifications(Path(__file__).with_name("schedule.json"), configuration)
+        activate_hermes_dependencies()
         home = prepare_runtime(configuration)
         from hermes_cli.plugins import discover_plugins
         discover_plugins()
