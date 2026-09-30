@@ -10,7 +10,7 @@ from typing import Mapping
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from notifications import ScheduleError, load_notifications, seed_jobs
+from notifications import ScheduledNotification, ScheduleError, load_notifications, seed_jobs
 
 
 LOGGER = logging.getLogger("billing_notifier")
@@ -129,10 +129,11 @@ def install_log_redaction(secrets: tuple[str, ...]) -> None:
 
 def prepare_runtime(configuration: Configuration) -> Path:
     from dotenv import set_key
-    from hermes_constants import get_hermes_home
+    from hermes_cli.profiles import get_profile_dir
     import yaml
 
-    home = get_hermes_home()
+    home = get_profile_dir("default")
+    os.environ["HERMES_HOME"] = str(home)
     home.mkdir(parents=True, exist_ok=True)
     environment = {
         "TELEGRAM_BOT_TOKEN": configuration.telegram_bot_token,
@@ -180,6 +181,21 @@ def prepare_runtime(configuration: Configuration) -> Path:
     return home
 
 
+def verify_dashboard_jobs(home: Path, notifications: list[ScheduledNotification]) -> None:
+    from hermes_cli.web_server_cron import _call_cron_for_profile, _cron_profile_home
+
+    profile, dashboard_home = _cron_profile_home("default")
+    if dashboard_home.resolve() != home.resolve():
+        raise ScheduleError("Notifier and dashboard cron stores do not match for the default profile")
+    jobs = _call_cron_for_profile(profile, "list_jobs", True)
+    expected = {"billing-notifier:" + item.identifier for item in notifications}
+    actual = {job.get("name") for job in jobs}
+    missing = expected - actual
+    if missing:
+        raise ScheduleError(f"Dashboard cron reader is missing {len(missing)} notifier jobs")
+    LOGGER.info("Dashboard default profile can read %d notifier jobs from %s", len(expected), home / "cron")
+
+
 def run_runtime(configuration: Configuration, provider, start_dashboard) -> int:
     stop_event = threading.Event()
     ticker_failed = threading.Event()
@@ -198,7 +214,8 @@ def run_runtime(configuration: Configuration, provider, start_dashboard) -> int:
     ticker = threading.Thread(target=run_native_ticker, name="hermes-native-cron", daemon=True)
     ticker.start()
     try:
-        start_dashboard(host="0.0.0.0", port=configuration.port, open_browser=False)
+        start_dashboard(host="0.0.0.0", port=configuration.port, open_browser=False,
+                initial_profile="default")
     finally:
         stop_event.set()
         provider.stop()
@@ -221,6 +238,7 @@ def main() -> int:
         from cron.scheduler_provider import InProcessCronScheduler
         from hermes_cli.web_server import start_server
         seed_jobs(home, notifications)
+        verify_dashboard_jobs(home, notifications)
     except (ConfigurationError, ScheduleError) as error:
         LOGGER.error("Startup configuration error: %s", error)
         return 1

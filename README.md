@@ -100,6 +100,12 @@ survives; unrelated jobs are untouched. Dashboard edits to owned definitions
 are reconciled from repository configuration on the next boot.
 
 Use the dashboard's Cron view to inspect, pause, resume or manually run a job.
+Notifier jobs belong to the `default` profile, which is selected at dashboard
+launch. If your browser retained another profile, select `default` in the
+dashboard. Startup verifies all configured jobs through the native dashboard
+reader and logs `Dashboard default profile can read 13 notifier jobs` with the
+cron store path. A missing job or mismatched store stops startup with an error.
+
 Native CLI commands in the container provide the same controls:
 
 ```sh
