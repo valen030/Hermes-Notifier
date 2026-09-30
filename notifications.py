@@ -1,23 +1,15 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
-
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-
 if TYPE_CHECKING:
     from app import Configuration
 
 
-LOGGER = logging.getLogger("billing_notifier")
 MONTHS = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
@@ -32,7 +24,7 @@ class ScheduleError(ValueError):
 class ScheduledNotification:
     identifier: str
     text: str = field(repr=False)
-    trigger: CronTrigger
+    schedule: str
 
 
 def load_notifications(path: Path, configuration: Configuration) -> list[ScheduledNotification]:
@@ -46,7 +38,6 @@ def load_notifications(path: Path, configuration: Configuration) -> list[Schedul
         raise ScheduleError("schedule.json requires bill_cron and birthday_cron arrays")
 
     hour, minute = map(int, configuration.notification_time.split(":"))
-    timezone = ZoneInfo(configuration.timezone)
     notifications = []
     for kind in ("bill_cron", "birthday_cron"):
         for index, entry in enumerate(schedule[kind]):
@@ -81,44 +72,47 @@ def load_notifications(path: Path, configuration: Configuration) -> list[Schedul
                     text = "Birthday reminder: " + name.strip()
                 if len(text) > 4096:
                     raise ValueError
-                trigger = CronTrigger(month=month, day=day, hour=hour, minute=minute, timezone=timezone)
+                expression = f"{minute} {hour} {day} {month} *"
             except (KeyError, TypeError, ValueError, AttributeError):
                 raise ScheduleError(f"Invalid schedule.json entry: {kind}[{index}]") from None
-            notifications.append(ScheduledNotification(f"{kind}-{index}", text, trigger))
+            notifications.append(ScheduledNotification(f"{kind}-{index}", text, expression))
     return notifications
 
 
-def deliver_notification(configuration: Configuration, text: str) -> bool:
-    request = Request(
-        "https://api.telegram.org/bot" + configuration.telegram_bot_token + "/sendMessage",
-        data=json.dumps({"chat_id": configuration.telegram_channel, "text": text}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=20) as response:
-            result = json.load(response)
-        if not isinstance(result, dict) or result.get("ok") is not True:
-            raise ValueError
-    except Exception:
-        LOGGER.error("Telegram notification failed; no automatic retry")
-        return False
-    LOGGER.info("Telegram notification sent")
-    return True
+def seed_jobs(home: Path, notifications: list[ScheduledNotification]) -> None:
+    from cron.jobs import list_jobs, remove_job, update_job, use_cron_store
+    from cron.scheduler import create_job_with_scheduler_registration
 
-
-def create_scheduler(
-    configuration: Configuration, notifications: list[ScheduledNotification]
-) -> BackgroundScheduler:
-    scheduler = BackgroundScheduler(
-        timezone=ZoneInfo(configuration.timezone),
-        job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
-    )
-    for notification in notifications:
-        scheduler.add_job(
-            deliver_notification,
-            trigger=notification.trigger,
-            id=notification.identifier,
-            args=(configuration, notification.text),
-        )
-    return scheduler
+    scripts = home / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    with use_cron_store(home):
+        existing = list_jobs(include_disabled=True)
+        desired_names = {"billing-notifier:" + item.identifier for item in notifications}
+        for notification in notifications:
+            name = "billing-notifier:" + notification.identifier
+            script = scripts / ("billing-notifier-" + notification.identifier + ".py")
+            temporary = script.with_suffix(".py.tmp")
+            temporary.write_text(f"print({notification.text!r})\n", encoding="utf-8")
+            temporary.chmod(0o600)
+            temporary.replace(script)
+            matches = [job for job in existing if job.get("name") == name]
+            if len(matches) > 1:
+                raise ScheduleError("Duplicate Hermes notifier job: " + notification.identifier)
+            definition = dict(
+                prompt="", schedule=notification.schedule, name=name,
+                script=script.name, no_agent=True, deliver="telegram",
+            )
+            if not matches:
+                existing.append(create_job_with_scheduler_registration(**definition))
+            else:
+                current = matches[0]
+                updates = {key: value for key, value in definition.items() if key != "schedule"
+                           and current.get(key) != value}
+                if (current.get("schedule") or {}).get("expr") != notification.schedule:
+                    updates["schedule"] = notification.schedule
+                if updates:
+                    update_job(current["id"], updates)
+        for job in existing:
+            name = job.get("name") or ""
+            if name.startswith("billing-notifier:") and name not in desired_names:
+                remove_job(job["id"])

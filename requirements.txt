@@ -1,2 +1,1 @@
-APScheduler==3.11.0
 tzdata>=2025.2,<2027
