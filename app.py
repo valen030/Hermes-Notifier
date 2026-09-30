@@ -225,7 +225,7 @@ def main() -> int:
         LOGGER.error("Startup configuration error: %s", error)
         return 1
     except Exception:
-        LOGGER.error("Hermes runtime initialization failed; check image compatibility and state permissions")
+        LOGGER.exception("Hermes runtime initialization failed after bootstrap")
         return 1
     LOGGER.info("Hermes ready with %d native reminders; Gateway is disabled", len(notifications))
     return run_runtime(configuration, InProcessCronScheduler(), start_server)

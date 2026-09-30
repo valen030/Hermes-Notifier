@@ -26,6 +26,12 @@ Gateway and interactive agent workflows are not part of this notifier service.
 
 ## Render Deployment
 
+Render builds directly from the deployed repository contents. No local Docker
+installation, Python environment, test files or generated artifacts are required.
+Keep `app.py`, `notifications.py` and `schedule.json` beside the root `Dockerfile`.
+Configure credentials in Render's Environment settings; do not include a local
+`.env` file in the deployment.
+
 Select a Docker web service using the repository-root `Dockerfile`. Leave the
 Docker command override empty. Set the health check path to `/api/status`.
 The authenticated Hermes dashboard is at the service's root URL and listens on
@@ -33,16 +39,17 @@ The authenticated Hermes dashboard is at the service's root URL and listens on
 for browser and WebSocket authentication; set `HERMES_DASHBOARD_PUBLIC_URL` to
 override it, for example when using a custom domain.
 
-Build locally:
+Optional local build (not required for Render):
 
 ```sh
 docker build --pull -t hermes-notifier .
 ```
 
-The build checks that the required native APIs can be imported, without
-contacting Telegram. Missing APIs in the moving `main` image fail the build
-rather than falling back to another scheduler. These checks do not validate
-Render's runtime ENV values or prove a successful Render launch.
+The build does not import or initialize Hermes before the image's runtime
+bootstrap. Native APIs are loaded at startup; failures produce a redacted
+traceback and stop the service, without falling back to another scheduler.
+A successful build does not validate Render's runtime ENV values or prove a
+successful Render launch.
 
 ## Environment Configuration
 
