@@ -39,11 +39,10 @@ Build locally:
 docker build --pull -t hermes-notifier .
 ```
 
-The build checks the installed native APIs and runs tests with temporary state
-and dummy credentials, without contacting Telegram. An incompatible moving
-`main` image fails those checks rather than falling back to another scheduler.
-Build tests do not validate Render's runtime ENV values or prove a successful
-Render launch.
+The build checks that the required native APIs can be imported, without
+contacting Telegram. Missing APIs in the moving `main` image fail the build
+rather than falling back to another scheduler. These checks do not validate
+Render's runtime ENV values or prove a successful Render launch.
 
 ## Environment Configuration
 
@@ -107,16 +106,6 @@ Messages are reminders, not account lookups or payment verification. Native
 Hermes owns scheduling, missed-run handling, claims, execution history and
 delivery errors. `/api/status` is a health probe, not evidence of a successful
 Telegram send. Check native Cron history and delivery status separately.
-
-Run local configuration, conversion, reconciliation and lifecycle tests:
-
-```sh
-python -m pip install -r requirements.txt
-python -m unittest test_notifications -v
-```
-
-The native integration test skips outside the Hermes runtime and runs during
-Docker builds. No model or real Telegram credentials are used in tests.
 
 ## Free Render Limits
 
